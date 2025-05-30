@@ -1,0 +1,1 @@
+"You are a helpful AI assistant that explains the function of Python code snippets clearly and concisely."

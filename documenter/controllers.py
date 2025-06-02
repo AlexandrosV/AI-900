@@ -1,12 +1,19 @@
+import datetime
 import requests
+import hashlib
 import yaml
+import mongo
+import os
 
 
-def read_file_from_repo(repo_url: str, file_path: str, branch: str):
+def generate_github_raw_url(repo_url: str, file_path: str, branch: str):
     base_raw_url = repo_url.replace(
         'https://github.com/', 'https://raw.githubusercontent.com/')
     raw_file_url = f"{base_raw_url}/{branch}/{file_path}"
+    return raw_file_url
 
+
+def read_file_from_repo(raw_file_url: str):
     print(f"Attempting to read YAML from: {raw_file_url}")
     try:
         response = requests.get(raw_file_url)
@@ -34,9 +41,9 @@ def read_file_from_repo(repo_url: str, file_path: str, branch: str):
         raise Exception(f"An unexpected error occurred: {e}")
 
 
-def get_files_to_analyse(repo_url: str, file_path: str, branch: str):
+def get_files_to_analyse(raw_file_url):
     try:
-        yaml_content = read_file_from_repo(repo_url, file_path, branch)
+        yaml_content = read_file_from_repo(raw_file_url)
         yaml_data = yaml.safe_load(yaml_content)
         if not yaml_data:
             raise ValueError("YAML file is empty or not properly formatted.")
@@ -48,14 +55,32 @@ def get_files_to_analyse(repo_url: str, file_path: str, branch: str):
         print(f"Error fetching YAML file: {e}")
 
 
+def generate_sha256_hash(code: str):
+    sha256_hash = hashlib.sha256()
+    sha256_hash.update(code.encode('utf-8'))
+    return sha256_hash.hexdigest()
+
+
 def analyse_files(AZURE_OAI_DEPLOYMENT, openai_client, repo_url: str, file_path: str, branch: str):
-    read_files = get_files_to_analyse(repo_url, file_path, branch)
+    raw_file_url = generate_github_raw_url(repo_url, file_path, branch)
+    read_files = get_files_to_analyse(raw_file_url)
+    document = {'_id': repo_url, 'id': repo_url, 'mainFiles': [], 'projectSummary': '',
+                'documentationURL': '', 'updatedAt': datetime.datetime.now()}
     for file in read_files:
+        temp_raw = generate_github_raw_url(repo_url, file, branch)
         print(f"File to analyse: {file}")
-        code = read_file_from_repo(repo_url, file, branch)
-        print(f"Code in {file}: {code[:100]}...")
-        # analyse_code(AZURE_OAI_DEPLOYMENT, openai_client, code)
-        return analyse_code(AZURE_OAI_DEPLOYMENT, openai_client, code)
+        code = read_file_from_repo(temp_raw)
+        hash = generate_sha256_hash(code)
+        summary = analyse_code(AZURE_OAI_DEPLOYMENT, openai_client, code)
+        mainFile = {'path': temp_raw, 'hash': hash, 'summary': summary}
+        document['mainFiles'].append(mainFile)
+        print(summary)
+    #######
+    COLLECTION = os.getenv('AZURE_MONGO_COLLECTION')
+    mongo_client = mongo.get_mongo_client()
+    print(mongo_client)
+    mongo.insert_document(mongo_client, COLLECTION, document)
+    mongo.find_document(mongo_client, COLLECTION, repo_url)
 
 
 def analyse_code(AZURE_OAI_DEPLOYMENT, openai_client, code: str):
@@ -63,7 +88,8 @@ def analyse_code(AZURE_OAI_DEPLOYMENT, openai_client, code: str):
                        encoding="utf8").read().strip()
     print(f"System role loaded: {system_role}")
     # TODO: set this as a parameter somewhere
-    user_message = f"Describe the function of the following Python code:\n\n```python\n{code}\n```.  formatted as an HTML paragraph using the name of the file as a header."
+    user_message = f"Describe the function of the following Python code:\n\n```python\n{code}\n```, formatted as an HTML paragraph using the name of the file as a header."
+    # user_message = f"Describe the function of the following Python code:\n\n```python\n{code}\n```."
     print("Sending request to Azure OpenAI...")
     response = openai_client.chat.completions.create(
         model=AZURE_OAI_DEPLOYMENT,
@@ -73,7 +99,7 @@ def analyse_code(AZURE_OAI_DEPLOYMENT, openai_client, code: str):
         ],
         # Controls creativity. Lower for more deterministic output.
         temperature=0.7,
-        max_tokens=250,  # Maximum number of tokens in the response
+        max_tokens=1000,  # Maximum number of tokens in the response
     )
     print("Response received from Azure OpenAI:")
     print(response.choices[0].message.content.strip())

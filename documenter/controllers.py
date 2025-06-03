@@ -71,24 +71,54 @@ def analyse_files(AZURE_OAI_DEPLOYMENT, openai_client, repo_url: str, file_path:
         print(f"File to analyse: {file}")
         code = read_file_from_repo(temp_raw)
         hash = generate_sha256_hash(code)
-        summary = analyse_code(AZURE_OAI_DEPLOYMENT, openai_client, code)
+        language = get_code_language(AZURE_OAI_DEPLOYMENT, openai_client, code)
+        summary = analyse_code(AZURE_OAI_DEPLOYMENT,
+                               openai_client, code, language)
         mainFile = {'path': temp_raw, 'hash': hash, 'summary': summary}
         document['mainFiles'].append(mainFile)
         print(summary)
     #######
     COLLECTION = os.getenv('AZURE_MONGO_COLLECTION')
+    # don't forget to close the client
     mongo_client = mongo.get_mongo_client()
     print(mongo_client)
     mongo.insert_document(mongo_client, COLLECTION, document)
     mongo.find_document(mongo_client, COLLECTION, repo_url)
+    mongo.close_client(mongo_client)
+    return "Al Done!"
 
 
-def analyse_code(AZURE_OAI_DEPLOYMENT, openai_client, code: str):
+def replace_word_simple(text: str, old_word: str, new_word: str):
+    return text.replace(old_word, new_word)
+
+
+def get_code_language(AZURE_OAI_DEPLOYMENT, openai_client, code: str):
+    system_role = 'You are an AI programming copilot that helps developers.'
+    print(f"System role loaded: {system_role}")
+    user_message = f"Identify the programming language of the following code:\n\n```\n{code}\n```. Give your answer in one word"
+    print("Sending request to Azure OpenAI...")
+    response = openai_client.chat.completions.create(
+        model=AZURE_OAI_DEPLOYMENT,
+        messages=[
+            {"role": "system", "content": system_role},
+            {"role": "user", "content": user_message}
+        ],
+        # Controls creativity. Lower for more deterministic output.
+        temperature=0.7,
+        max_tokens=1000,  # Maximum number of tokens in the response
+    )
+    print("Response received from Azure OpenAI:")
+    print(response.choices[0].message.content.strip())
+    return response.choices[0].message.content.strip()
+
+
+def analyse_code(AZURE_OAI_DEPLOYMENT, openai_client, code: str, language: str):
     system_role = open(file="system_role.txt",
                        encoding="utf8").read().strip()
+    system_role = replace_word_simple(system_role, "LANGUAGE", language)
     print(f"System role loaded: {system_role}")
     # TODO: set this as a parameter somewhere
-    user_message = f"Describe the function of the following Python code:\n\n```python\n{code}\n```, formatted as an HTML paragraph using the name of the file as a header."
+    user_message = f"Describe the function of the following Python code:\n\n```{language}\n{code}\n```, formatted as an HTML paragraph using the name of the file as a header."
     # user_message = f"Describe the function of the following Python code:\n\n```python\n{code}\n```."
     print("Sending request to Azure OpenAI...")
     response = openai_client.chat.completions.create(

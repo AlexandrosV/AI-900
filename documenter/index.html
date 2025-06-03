@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body>
+    
+<h2>app.py</h2>
+<p>
+This Python code defines a Flask web application that provides an API for tracking and retrieving Bitcoin price data in EUR and CZK. When the application starts, it launches a background thread that periodically fetches the latest Bitcoin price from an external provider (configured via environment variables) using the <code>get_price</code> function, and stores the results in a database (presumably AWS DynamoDB) via the <code>put_item</code> function. The root endpoint (<code>/</code>) displays basic info about the app configuration. The <code>/bitcoinday/&lt;date&gt;</code> endpoint returns the average daily Bitcoin price for a given date (defaulting to today if not specified), while the <code>/bitcoinmonth/&lt;date&gt;</code> endpoint provides the average monthly price for a given month (defaulting to the current month if not specified). The endpoints return the average price in both EUR and CZK, along with the requested date and the time of the request. The application is intended to run as a standalone server and uses environment variables for configuration.
+</p>
+</body>
+</html>

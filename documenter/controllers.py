@@ -66,6 +66,10 @@ def analyse_files(AZURE_OAI_DEPLOYMENT, openai_client, repo_url: str, file_path:
     read_files = get_files_to_analyse(raw_file_url)
     document = {'_id': repo_url, 'id': repo_url, 'mainFiles': [], 'projectSummary': '',
                 'documentationURL': '', 'updatedAt': datetime.datetime.now()}
+    COLLECTION = os.getenv('AZURE_MONGO_COLLECTION')
+    mongo_client = mongo.get_mongo_client()
+    print(mongo_client)
+    mongo.create_collection(mongo_client, COLLECTION)
     for file in read_files:
         temp_raw = generate_github_raw_url(repo_url, file, branch)
         print(f"File to analyse: {file}")
@@ -75,17 +79,15 @@ def analyse_files(AZURE_OAI_DEPLOYMENT, openai_client, repo_url: str, file_path:
         summary = analyse_code(AZURE_OAI_DEPLOYMENT,
                                openai_client, code, language)
         mainFile = {'path': temp_raw, 'hash': hash, 'summary': summary}
+        mongo.insert_file_analysis_data(
+            mongo_client, COLLECTION, temp_raw, hash, summary, repo_url)
         document['mainFiles'].append(mainFile)
         print(summary)
-    #######
-    COLLECTION = os.getenv('AZURE_MONGO_COLLECTION')
-    # don't forget to close the client
-    mongo_client = mongo.get_mongo_client()
-    print(mongo_client)
-    mongo.insert_document(mongo_client, COLLECTION, document)
-    mongo.find_document(mongo_client, COLLECTION, repo_url)
+    ######
+    # mongo.insert_document(mongo_client, COLLECTION, document)
+    # mongo.find_document(mongo_client, COLLECTION, repo_url)
     mongo.close_client(mongo_client)
-    return "Al Done!"
+    return "All Done!"
 
 
 def replace_word_simple(text: str, old_word: str, new_word: str):
@@ -118,8 +120,8 @@ def analyse_code(AZURE_OAI_DEPLOYMENT, openai_client, code: str, language: str):
     system_role = replace_word_simple(system_role, "LANGUAGE", language)
     print(f"System role loaded: {system_role}")
     # TODO: set this as a parameter somewhere
-    user_message = f"Describe the function of the following Python code:\n\n```{language}\n{code}\n```, formatted as an HTML paragraph using the name of the file as a header."
-    # user_message = f"Describe the function of the following Python code:\n\n```python\n{code}\n```."
+    # user_message = f"Describe the function of the following Python code:\n\n```{language}\n{code}\n```, formatted as an HTML paragraph using the name of the file as a header."
+    user_message = f"Describe the function of the following Python code:\n\n```python\n{code}\n```."
     print("Sending request to Azure OpenAI...")
     response = openai_client.chat.completions.create(
         model=AZURE_OAI_DEPLOYMENT,
